@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EduAnalytics — Teacher Performance Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-icon">EA</div>
+        <div>
+          <h1>EduAnalytics</h1>
+          <p>Teacher Console</p>
+        </div>
+      </div>
+
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="dashboard">Dashboard</button>
+        <button class="nav-item" data-tab="students">Students</button>
+        <button class="nav-item" data-tab="assessments">Assessments</button>
+        <button class="nav-item" data-tab="gaps">Learning Gaps</button>
+        <button class="nav-item" data-tab="predictions">ML Predictions</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <p class="research-note">
+          Using synthetic academic data. Predictions &amp; gap flags are supportive estimates, not definitive ability labels.
+        </p>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main-content">
+      <header class="topbar">
+        <div>
+          <h2 id="page-title">Class Performance Dashboard</h2>
+          <p class="subtitle">Monitor student progress, subject trends, and topic-level learning gaps</p>
+        </div>
+        <div class="topbar-actions">
+          <a href="/api/export/csv" class="btn btn-outline">Export CSV</a>
+          <button class="btn btn-outline" onclick="openImportModal()">+ Import CSV</button>
+          <button class="btn btn-secondary" onclick="openStudentModal()">+ Add Student</button>
+          <button class="btn btn-primary" onclick="openAssessmentModal()">+ Record Marks</button>
+        </div>
+      </header>
+
+      <!-- Tab: Dashboard -->
+      <section id="tab-dashboard" class="tab-panel active">
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <span class="kpi-label">Total Students</span>
+            <strong class="kpi-value" id="kpi-total-students">0</strong>
+            <span class="kpi-sub" id="kpi-subjects-monitored">0 subjects monitored</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Class Average</span>
+            <strong class="kpi-value" id="kpi-avg-performance">0%</strong>
+            <span class="kpi-sub">Across all recorded assessments</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">Pass Rate (&ge; 50%)</span>
+            <strong class="kpi-value" id="kpi-pass-rate">0%</strong>
+            <span class="kpi-sub">Students meeting pass threshold</span>
+          </div>
+          <div class="kpi-card kpi-alert">
+            <span class="kpi-label">Needs Support (&lt; 50%)</span>
+            <strong class="kpi-value" id="kpi-support-count">0</strong>
+            <span class="kpi-sub">Students flagged for early intervention</span>
+          </div>
+        </div>
+
+        <div class="charts-grid">
+          <div class="card chart-card wide">
+            <div class="card-header">
+              <h3>Subject-wise Average Performance (%)</h3>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="subjectChart"></canvas>
+            </div>
+          </div>
+
+          <div class="card chart-card">
+            <div class="card-header">
+              <h3>Performance Distribution</h3>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="distributionChart"></canvas>
+            </div>
+          </div>
+
+          <div class="card chart-card full">
+            <div class="card-header">
+              <h3>Assessment Performance Trend Over Time</h3>
+            </div>
+            <div class="chart-wrap">
+              <canvas id="trendChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab: Students -->
+      <section id="tab-students" class="tab-panel">
+        <div class="card">
+          <div class="card-header toolbar">
+            <div class="title-with-count">
+              <h3>Student Directory</h3>
+              <span class="count-pill" id="students-count-pill">0 students</span>
+            </div>
+            <div class="filters">
+              <input type="text" id="student-search" placeholder="Search name or roll no..." oninput="loadStudents()" />
+              <select id="dept-filter" onchange="loadStudents()">
+                <option value="">All Departments</option>
+              </select>
+              <select id="sem-filter" onchange="loadStudents()">
+                <option value="">All Semesters</option>
+              </select>
+              <select id="student-status-filter" onchange="loadStudents()">
+                <option value="">All Performance</option>
+                <option value="strong">Strong (&ge; 75%)</option>
+                <option value="monitor">Monitor (50–74%)</option>
+                <option value="support">Needs Support (&lt; 50%)</option>
+              </select>
+              <button class="btn btn-outline btn-sm" onclick="clearStudentFilters()">Clear</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Roll No.</th>
+                  <th>Name</th>
+                  <th>Department</th>
+                  <th>Semester</th>
+                  <th>Assessments</th>
+                  <th>Average</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="students-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab: Assessments -->
+      <section id="tab-assessments" class="tab-panel">
+        <div class="card">
+          <div class="card-header toolbar">
+            <div class="title-with-count">
+              <h3>Recorded Assessments</h3>
+              <span class="count-pill" id="assessments-count-pill">0 records</span>
+            </div>
+            <div class="filters">
+              <input type="text" id="assess-search" placeholder="Search student, roll no, topic..." oninput="loadAssessments()" />
+              <select id="assess-dept-filter" onchange="loadAssessments()">
+                <option value="">All Departments</option>
+              </select>
+              <select id="subject-filter" onchange="loadAssessments()">
+                <option value="">All Subjects</option>
+              </select>
+              <select id="assess-type-filter" onchange="loadAssessments()">
+                <option value="">All Types</option>
+              </select>
+              <select id="assess-status-filter" onchange="loadAssessments()">
+                <option value="">All Scores</option>
+                <option value="strong">Strong (&ge; 75%)</option>
+                <option value="monitor">Monitor (50–74%)</option>
+                <option value="support">Needs Support (&lt; 50%)</option>
+              </select>
+              <button class="btn btn-outline btn-sm" onclick="clearAssessmentFilters()">Clear</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Roll No.</th>
+                  <th>Student</th>
+                  <th>Department</th>
+                  <th>Subject</th>
+                  <th>Topic</th>
+                  <th>Type</th>
+                  <th>Score</th>
+                  <th>%</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="assessments-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab: Learning Gaps -->
+      <section id="tab-gaps" class="tab-panel">
+        <div class="card">
+          <div class="card-header toolbar">
+            <div class="title-with-count">
+              <h3>Filter Learning Gaps &amp; Support List</h3>
+              <span class="count-pill" id="gaps-count-pill">0 gaps · 0 students</span>
+            </div>
+            <div class="filters">
+              <input type="text" id="gap-search" placeholder="Search subject, topic, or student..." oninput="applyGapFilters()" />
+              <select id="gap-subject-filter" onchange="applyGapFilters()">
+                <option value="">All Subjects</option>
+              </select>
+              <select id="gap-dept-filter" onchange="applyGapFilters()">
+                <option value="">All Departments</option>
+              </select>
+              <select id="gap-severity-filter" onchange="applyGapFilters()">
+                <option value="">All Severity Levels</option>
+                <option value="high">Critical / High Priority (&lt; 50%)</option>
+                <option value="medium">Moderate / Medium (50–64%)</option>
+              </select>
+              <button class="btn btn-outline btn-sm" onclick="clearGapFilters()">Clear</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="gaps-grid">
+          <div class="card">
+            <div class="card-header">
+              <h3>Topic-Level Learning Gaps (&lt; 65%)</h3>
+              <span class="count-pill" id="topic-gaps-count">0</span>
+            </div>
+            <div id="topic-gaps-list" class="gap-list"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h3>Students Needing Academic Support</h3>
+              <span class="count-pill" id="support-students-count">0</span>
+            </div>
+            <div id="support-students-list" class="gap-list"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab: ML Predictions -->
+      <section id="tab-predictions" class="tab-panel">
+        <div class="card">
+          <div class="card-header toolbar">
+            <div>
+              <div class="title-with-count">
+                <h3>Predictive Performance Analysis</h3>
+                <span class="count-pill" id="predictions-count-pill">0 students</span>
+              </div>
+              <p class="subtitle" id="prediction-model-info">Loading model...</p>
+            </div>
+            <div class="filters">
+              <input type="text" id="pred-search" placeholder="Search name or roll no..." oninput="applyPredictionFilters()" />
+              <select id="pred-dept-filter" onchange="applyPredictionFilters()">
+                <option value="">All Departments</option>
+              </select>
+              <select id="pred-risk-filter" onchange="applyPredictionFilters()">
+                <option value="">All Estimates</option>
+                <option value="High Support Priority">High Support Priority</option>
+                <option value="Monitor">Monitor</option>
+                <option value="On Track">On Track</option>
+              </select>
+              <button class="btn btn-outline btn-sm" onclick="clearPredictionFilters()">Clear</button>
+            </div>
+          </div>
+          <p class="subtitle" id="prediction-disclaimer" style="margin-bottom:14px;"></p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Roll No.</th>
+                  <th>Student</th>
+                  <th>Dept</th>
+                  <th>Assessments</th>
+                  <th>Current Avg</th>
+                  <th>Est. Next Score</th>
+                  <th>Trend Slope</th>
+                  <th>Support Estimate</th>
+                  <th>Confidence</th>
+                </tr>
+              </thead>
+              <tbody id="predictions-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal: Add/Edit Student -->
+  <div id="student-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="student-modal-title">Add Student</h3>
+        <button class="close-btn" onclick="closeModal('student-modal')">&times;</button>
+      </div>
+      <form id="student-form" onsubmit="saveStudent(event)">
+        <input type="hidden" id="student-id" />
+        <label>Roll Number
+          <input type="text" id="student-roll" required placeholder="e.g. CS2411" />
+        </label>
+        <label>Full Name
+          <input type="text" id="student-name" required placeholder="e.g. Kavya Ramesh" />
+        </label>
+        <label>Department
+          <select id="student-dept" required>
+            <option value="CSE">CSE</option>
+            <option value="AI & DS">AI &amp; DS</option>
+            <option value="IT">IT</option>
+            <option value="ECE">ECE</option>
+            <option value="EEE">EEE</option>
+          </select>
+        </label>
+        <label>Semester
+          <input type="text" id="student-sem" required value="Sem 4" />
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-outline" onclick="closeModal('student-modal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Student</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Record Assessment -->
+  <div id="assessment-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Record Assessment Marks</h3>
+        <button class="close-btn" onclick="closeModal('assessment-modal')">&times;</button>
+      </div>
+      <form id="assessment-form" onsubmit="saveAssessment(event)">
+        <label>Student
+          <select id="assess-student" required></select>
+        </label>
+        <label>Subject
+          <select id="assess-subject" required onchange="toggleCustomInput('assess-subject', 'assess-subject-custom')">
+            <option value="Python Programming">Python Programming</option>
+            <option value="DBMS">DBMS</option>
+            <option value="Mathematics">Mathematics</option>
+            <option value="Computer Networks">Computer Networks</option>
+            <option value="Artificial Intelligence">Artificial Intelligence</option>
+            <option value="__other__">Other (Enter Custom Subject)...</option>
+          </select>
+        </label>
+        <label id="assess-subject-custom-wrap" style="display:none;">Custom Subject Name
+          <input type="text" id="assess-subject-custom" placeholder="e.g. Data Structures" />
+        </label>
+        <label>Topic
+          <input type="text" id="assess-topic" required placeholder="e.g. Linear Algebra" />
+        </label>
+        <label>Assessment Type
+          <select id="assess-type" required onchange="toggleCustomInput('assess-type', 'assess-type-custom')">
+            <option value="Internal 1">Internal 1</option>
+            <option value="Internal 2">Internal 2</option>
+            <option value="Assignment">Assignment</option>
+            <option value="Quiz">Quiz</option>
+            <option value="Lab">Lab</option>
+            <option value="__other__">Other (Enter Custom Type)...</option>
+          </select>
+        </label>
+        <label id="assess-type-custom-wrap" style="display:none;">Custom Assessment Type
+          <input type="text" id="assess-type-custom" placeholder="e.g. Viva / Seminar / Mid-Term" />
+        </label>
+        <div class="form-row">
+          <label>Score
+            <input type="number" id="assess-score" required min="0" step="0.5" placeholder="78" />
+          </label>
+          <label>Max Score
+            <input type="number" id="assess-max" required min="1" step="1" value="100" />
+          </label>
+        </div>
+        <label>Date
+          <input type="date" id="assess-date" required />
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-outline" onclick="closeModal('assessment-modal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save Marks</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Import CSV -->
+  <div id="import-modal" class="modal hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>Import Students &amp; Marks (CSV)</h3>
+        <button class="close-btn" onclick="closeModal('import-modal')">&times;</button>
+      </div>
+      <form id="import-form" onsubmit="uploadCsv(event)">
+        <p class="subtitle" style="margin-bottom:12px;">
+          Upload a <code>.csv</code> file with columns: <strong>roll_number, name, department, semester</strong> (and optional assessment columns: <em>subject, topic, assessment_type, score, max_score, assessed_date</em>).
+        </p>
+        <p style="margin-bottom:14px;">
+          <a href="/api/import/template" class="btn btn-secondary btn-sm">Download Sample CSV Template</a>
+        </p>
+        <label>Select CSV File
+          <input type="file" id="import-file" accept=".csv" required />
+        </label>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-outline" onclick="closeModal('import-modal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">Upload &amp; Import</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: Individual Student Report -->
+  <div id="report-modal" class="modal hidden">
+    <div class="modal-card modal-wide">
+      <div class="modal-header">
+        <h3 id="report-title">Student Performance Report</h3>
+        <button class="close-btn" onclick="closeModal('report-modal')">&times;</button>
+      </div>
+      <div id="report-body"></div>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
